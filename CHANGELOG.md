@@ -1,17 +1,26 @@
-Batch-Converter-Unity Change Log:
+Daz To Unity Change Log:
 =================================
-Version 0.1:
-- Initial commit.
-- Checks for Autoexec-jobpool.txt and enters batch conversion mode.
-- Hardcoded for uDTU HDRP shaders.
+Version 2.0:
+- Many uDTU features now merged with official Daz To Unity bridge, including:
+- Mac support,
+- Animation support,
+- Improved HDRP Shaders,
+- Genesis 8.1 and PBRSkin support,
+- Improved Subdivision support,
+- Improved Emission support.
 
+Version 1.3 alpha 4:
+- Fixed assembly definition for Scripts/Editor folder.  Projects should now properly build.
+- Fixed error when importing with dForce Support enabled.
 
+Version 1.3 alpha 3:
+- You will need to delete any existing DTU plugin from "Assets/Daz3D" folder.  You can save your previous exported assets.
+- UseNewShaders is now enabled by default.
+- Added improved Hair shaders for HDRP and URP.
+- Alpha-value Bugfixes to Hair shaders: OOT, OmUberSurface.
 
-
-uDTU Change Log:
-===========
 Version 1.3 alpha 1:
-- The Unity Package is now separated from the Daz Studio Plugin.
+- The Unity Package Source Code is now separated from the Daz Studio Plugin Source Code Repository.
 
 Version 1.2:
 - Bugfixed crash when exporting subdivisions for more than one figure in a single session.
@@ -35,7 +44,6 @@ Version 1.1:
 - Fixed Alpha Clip Threshold bug in URP: affected depth-testing, especially hair.
 - Glossy Anisotropy, Roughness and Weight fixes.
 - "eyelash" material assigned to Hair shader.
-- Changed window titles to "uDTU".
 
 Version 1.0:
 - Bugfix: Imported asset files with different hash values are appropriately overwritten.
