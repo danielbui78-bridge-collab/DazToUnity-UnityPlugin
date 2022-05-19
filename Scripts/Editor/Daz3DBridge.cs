@@ -1,4 +1,6 @@
 ﻿#define USING_HDRP
+#define USING_HARDCODED_RENDERPIPELINE
+
 
 using UnityEngine;
 using UnityEditor;
@@ -118,7 +120,7 @@ namespace Daz3D
 
         static void AutoImport()
         {
-#if USING_HDRP || USING_URP || USING_BUILTIN
+#if USING_HDRP || USING_URP || USING_BUILTIN 
         // check for to_load file
         if (System.IO.File.Exists("Assets/Daz3D/dtu_toload.txt"))
         {
@@ -186,7 +188,7 @@ namespace Daz3D
             _instance.titleContent = new GUIContent("Daz To Unity: HDRP");
 #elif USING_URP
             _instance.titleContent = new GUIContent("Daz To Unity: URP");
-#elif USING_BUILTIN
+#elif USING_BUILTIN 
             _instance.titleContent = new GUIContent("Daz To Unity: Built-In Rendering");
 #else
             _instance.titleContent = new GUIContent("Daz To Unity: RenderPipeline Not Detected");
@@ -386,12 +388,15 @@ namespace Daz3D
 
             GUILayout.Space(12);
 //            Daz3DDTUImporter.EnableDForceSupport = GUILayout.Toggle(Daz3DDTUImporter.EnableDForceSupport, "Enable dForce support (experimental)", bigStyle);
-#if USING_HDRP || USING_URP
-//            Daz3DDTUImporter.UseNewShaders = GUILayout.Toggle(Daz3DDTUImporter.UseNewShaders, "Use New Shaders", bigStyle);
-            Daz3DDTUImporter.UseNewShaders = !GUILayout.Toggle(!(Daz3DDTUImporter.UseNewShaders), "Use Legacy Shaders", bigStyle);
+#if USING_HDRP
+            Daz3DDTUImporter.UseLegacyShaders = GUILayout.Toggle((Daz3DDTUImporter.UseLegacyShaders), "Use Legacy Shaders", bigStyle);
 #else
-            GUILayout.Label("New Shaders only available for HDRP and URP", bigStyle);
-            Daz3DDTUImporter.UseNewShaders = false;            
+            GUILayout.Label("Legacy Shaders Option only available for HDRP", bigStyle);
+#endif
+#if USING_URP
+            Daz3DDTUImporter.UseLegacyShaders = false;
+#elif USING_BUILTIN
+            Daz3DDTUImporter.UseLegacyShaders = true;
 #endif
 
             GUILayout.Space(12);
@@ -408,10 +413,12 @@ namespace Daz3D
 #else
             GUILayout.TextArea("No Renderpipeline configured.  Press Redetect RenderPipeline to configure now.");
 #endif
+
+#if !USING_HARDCODED_RENDERPIPELINE
             GUILayout.Space(12);
             if (GUILayout.Button("Redetect RenderPipeline", GUILayout.Width(200)))
                 DetectRenderPipeline.RunOnce();
-
+#endif
             GUILayout.EndVertical();
 
             GUILayout.FlexibleSpace();

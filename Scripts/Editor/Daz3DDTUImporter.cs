@@ -1,4 +1,6 @@
 ﻿#define USING_HDRP
+#define USING_HARDCODED_RENDERPIPELINE
+
 
 using UnityEditor;
 using UnityEditor.Experimental.AssetImporters;
@@ -22,10 +24,11 @@ namespace Daz3D
         public static bool ReplaceMaterials = true;
         public static bool EnableDForceSupport = false;
 #if USING_HDRP || USING_URP
-        public static bool UseNewShaders = true;
+        public static bool UseLegacyShaders = false;
 #else
-        public static bool UseNewShaders = false;
+        public static bool UseLegacyShaders = true;
 #endif
+
         public static void ResetOptions()
         {
             AutoImportDTUChanges = true;
@@ -35,9 +38,9 @@ namespace Daz3D
             ReplaceMaterials = true;
             EnableDForceSupport = false;
 #if USING_HDRP || USING_URP
-            UseNewShaders = true;
+            UseLegacyShaders = false;
 #else
-            UseNewShaders = false;
+            UseLegacyShaders = true;
 #endif
         }
 
@@ -320,7 +323,7 @@ namespace Daz3D
         private static bool IrayShadersReady()
         {
 
-#if USING_HDRP || USING_URP || USING_BUILTIN
+#if USING_HDRP || USING_BUILTIN
             if (
                 Shader.Find(DTU_Constants.shaderNameMetal) == null ||
                 Shader.Find(DTU_Constants.shaderNameSpecular) == null ||
@@ -329,6 +332,18 @@ namespace Daz3D
                 Shader.Find(DTU_Constants.shaderNameWet) == null ||
                 Shader.Find(DTU_Constants.shaderNameInvisible) == null
             ) {
+                return false;
+            }
+
+            return true;
+#elif USING_URP
+            if (
+                Shader.Find(DTU_Constants.newShaderNameBase + "Hair") == null ||
+                Shader.Find(DTU_Constants.newShaderNameBase + "SSS") == null ||
+                Shader.Find(DTU_Constants.newShaderNameBase + "Specular") == null ||
+                Shader.Find(DTU_Constants.newShaderNameBase + "Metallic") == null 
+            )
+            {
                 return false;
             }
 
@@ -398,7 +413,7 @@ namespace Daz3D
 
         //}
 
-        
+
         public static IEnumerator ImportDTURoutine(string path, Action<DTU> dtuOut, float progressLimit)
         {
             Debug.Log("ImportDTU for " + path);
@@ -442,6 +457,11 @@ namespace Daz3D
             {
                 DTUMaterial dtuMat = dtu.Materials[i];
                 var material = dtu.ConvertToUnity(dtuMat);
+                if (!material)
+                {
+                    continue;
+                }
+
                 var key = Utilities.ScrubKey(dtuMat.MaterialName);
                 _map.AddMaterial(key, material);
 

@@ -5,6 +5,8 @@ Version 2.0:
 - Mac support,
 - Animation support,
 - Improved HDRP Shaders,
+- New URP Shader support,
+- Built-In Standard Shader support,
 - Genesis 8.1 and PBRSkin support,
 - Improved Subdivision support,
 - Improved Emission support.
