@@ -1,4 +1,8 @@
-﻿using UnityEditor;
+﻿#define USING_HDRP
+#define USING_HARDCODED_RENDERPIPELINE
+
+
+using UnityEditor;
 using UnityEditor.Experimental.AssetImporters;
 using System.Collections.Generic;
 using System;
@@ -20,10 +24,11 @@ namespace Daz3D
         public static bool ReplaceMaterials = true;
         public static bool EnableDForceSupport = false;
 #if USING_HDRP || USING_URP
-        public static bool UseNewShaders = true;
+        public static bool UseLegacyShaders = false;
 #else
-        public static bool UseNewShaders = false;
+        public static bool UseLegacyShaders = true;
 #endif
+
         public static void ResetOptions()
         {
             AutoImportDTUChanges = true;
@@ -33,9 +38,9 @@ namespace Daz3D
             ReplaceMaterials = true;
             EnableDForceSupport = false;
 #if USING_HDRP || USING_URP
-            UseNewShaders = true;
+            UseLegacyShaders = false;
 #else
-            UseNewShaders = false;
+            UseLegacyShaders = true;
 #endif
         }
 
@@ -103,6 +108,8 @@ namespace Daz3D
         /// </summary>
         public override void OnImportAsset(AssetImportContext ctx)
         {
+            if (Daz3DBridge.BatchConversionMode != 0) return;
+
             if (AutoImportDTUChanges)
             {
                 var dtuPath = ctx.assetPath;
@@ -145,10 +152,10 @@ namespace Daz3D
                 Path = path;
             }
 
-            public void AddMaterial(UnityEngine.Material material)
+            public void AddMaterial(string key, UnityEngine.Material material)
             {
-                if (material && !Map.ContainsKey(material.name))
-                    Map.Add(material.name, material);
+                if (material && !Map.ContainsKey(key))
+                    Map.Add(key, material);
             }
             public string Path { get; set; }
             public Dictionary<string, UnityEngine.Material> Map = new Dictionary<string, UnityEngine.Material>();
@@ -220,9 +227,11 @@ namespace Daz3D
             //DEBUG
             //Debug.LogError("dtuPath = [" + dtuPath + "] " + dtuPath.Length);
 
-            Daz3DBridge.ShowWindow();
-
-            Daz3DBridge.CurrentToolbarMode = Daz3DBridge.ToolbarMode.History; //force into history mode during import
+            if (Daz3DBridge.BatchConversionMode == 0)
+            {
+                Daz3DBridge.ShowWindow();
+                Daz3DBridge.CurrentToolbarMode = Daz3DBridge.ToolbarMode.History; //force into history mode during import
+            }
 
             Daz3DBridge.Progress = .03f;
                 yield return new WaitForEndOfFrame();
@@ -256,6 +265,7 @@ namespace Daz3D
                 Daz3DBridge.Progress = 0;
                 _map = null;
                 _dforceMap = null;
+                Daz3DBridge.ReadyToImport = true;
                 yield break;
             }
 
@@ -265,6 +275,7 @@ namespace Daz3D
                 Daz3DBridge.Progress = 0;
                 _map = null;
                 _dforceMap = null;
+                Daz3DBridge.ReadyToImport = true;
                 yield break;
             }
 
@@ -274,7 +285,7 @@ namespace Daz3D
                 yield return new WaitForEndOfFrame();
 
             if (GenerateUnityPrefab)
-                GeneratePrefabFromFBX(fbxPath, platform);
+                GeneratePrefabFromFBX(fbxPath, platform, dtu);
 
             Daz3DBridge.Progress = 1f;
                 yield return new WaitForEndOfFrame();
@@ -285,9 +296,13 @@ namespace Daz3D
             Daz3DBridge.Progress = 0;
 
             // DB 2021-09-02: Show DTUImport complete dialog
-            EditorUtility.DisplayDialog("DTU Bridge Import", "Import Completed for " + dtuPath, "OK");
+            if (Daz3DBridge.BatchConversionMode == 0)
+            {
+                EditorUtility.DisplayDialog("DTU Bridge Import", "Import Completed for " + dtuPath, "OK");
+                Daz3DBridge.AddDiffusionProfilePrompt();
+            }
 
-            Daz3DBridge.AddDiffusionProfilePrompt();
+            Daz3DBridge.ReadyToImport = true;
 
             yield break;
         }
@@ -308,7 +323,7 @@ namespace Daz3D
         private static bool IrayShadersReady()
         {
 
-#if USING_HDRP || USING_URP || USING_BUILTIN
+#if USING_HDRP || USING_BUILTIN
             if (
                 Shader.Find(DTU_Constants.shaderNameMetal) == null ||
                 Shader.Find(DTU_Constants.shaderNameSpecular) == null ||
@@ -317,6 +332,18 @@ namespace Daz3D
                 Shader.Find(DTU_Constants.shaderNameWet) == null ||
                 Shader.Find(DTU_Constants.shaderNameInvisible) == null
             ) {
+                return false;
+            }
+
+            return true;
+#elif USING_URP
+            if (
+                Shader.Find(DTU_Constants.newShaderNameBase + "Hair") == null ||
+                Shader.Find(DTU_Constants.newShaderNameBase + "SSS") == null ||
+                Shader.Find(DTU_Constants.newShaderNameBase + "Specular") == null ||
+                Shader.Find(DTU_Constants.newShaderNameBase + "Metallic") == null 
+            )
+            {
                 return false;
             }
 
@@ -387,7 +414,6 @@ namespace Daz3D
         //}
 
 
-        
         public static IEnumerator ImportDTURoutine(string path, Action<DTU> dtuOut, float progressLimit)
         {
             Debug.Log("ImportDTU for " + path);
@@ -398,6 +424,12 @@ namespace Daz3D
             EventQueue.Enqueue(record);
 
             var dtu = DTUConverter.ParseDTUFile(path);
+
+            if (Daz3DBridge.BatchConversionMode == 1)
+            {
+                dtu.UseSharedMaterialDir = true;
+                dtu.UseSharedTextureDir = true;
+            }
 
             // DB (2021-05-15): skip DTU import if animation
             if (dtu.AssetType == "Animation")
@@ -412,7 +444,8 @@ namespace Daz3D
             var dtuObject = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(path);
 
             record.AddToken("Imported DTU file: " + path);
-            record.AddToken(dtuObject.name, dtuObject, ENDLINE);
+            if (dtuObject != null)
+                record.AddToken(dtuObject.name, dtuObject, ENDLINE);
 
             //UnityEngine.Debug.Log("DTU: " + dtu.AssetName + " contains: " + dtu.Materials.Count + " materials");
 
@@ -422,9 +455,15 @@ namespace Daz3D
 
             for (int i = 0; i < dtu.Materials.Count; i++)
             {
-                var dtuMat = dtu.Materials[i];
+                DTUMaterial dtuMat = dtu.Materials[i];
                 var material = dtu.ConvertToUnity(dtuMat);
-                _map.AddMaterial(material);
+                if (!material)
+                {
+                    continue;
+                }
+
+                var key = Utilities.ScrubKey(dtuMat.MaterialName);
+                _map.AddMaterial(key, material);
 
                 // DB (2021-05-25): DForce import
                 if (dtu.IsDTUMaterialDForceEnabled(dtuMat))
@@ -441,15 +480,16 @@ namespace Daz3D
             }
             record.AddToken(" based on DTU file.", null, ENDLINE);
 
-
-            Daz3DBridge bridge = EditorWindow.GetWindow(typeof(Daz3DBridge)) as Daz3DBridge;
-            if (bridge == null)
+            if (Daz3DBridge.BatchConversionMode == 0)
             {
-                var consoleType = Type.GetType("ConsoleWindow,UnityEditor.dll");
-                bridge = EditorWindow.CreateWindow<Daz3DBridge>(new[] { consoleType });
+                Daz3DBridge bridge = EditorWindow.GetWindow(typeof(Daz3DBridge)) as Daz3DBridge;
+                if (bridge == null)
+                {
+                    var consoleType = Type.GetType("ConsoleWindow,UnityEditor.dll");
+                    bridge = EditorWindow.CreateWindow<Daz3DBridge>(new[] { consoleType });
+                }
+                bridge?.Focus();
             }
-
-            bridge?.Focus();
 
             //just a safeguard to keep the history data at a managable size (100 records)
             while (EventQueue.Count > 100)
@@ -493,19 +533,19 @@ namespace Daz3D
             Torso
         }
 
-        public static void GeneratePrefabFromFBX(string fbxPath, DazFigurePlatform platform)
+        public static void GeneratePrefabFromFBX(string fbxPath, DazFigurePlatform platform, DTU dtu)
         {
             var fbxPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(fbxPath);
 
             if (fbxPrefab == null)
             {
-                Debug.LogWarning("no FBX model prefab found at " + fbxPath);
+                Debug.LogError("no FBX model prefab found at " + fbxPath);
                 return;
             }
 
             if (PrefabUtility.GetPrefabAssetType(fbxPrefab) != PrefabAssetType.Model)
             {
-                Debug.LogWarning(fbxPath + " is not a model prefab ");
+                Debug.LogError(fbxPath + " is not a model prefab ");
                 return;
             }
 
@@ -612,12 +652,17 @@ namespace Daz3D
 
             //remap the materials
             var workingInstance = Instantiate(fbxPrefab);
-            workingInstance.name = "Daz3d_" + fbxPrefab.name;
+            string workingInstance_name = fbxPrefab.name;
+            if (dtu.ProductComponentName != "")
+                workingInstance_name = dtu.ProductComponentName;
+            else if (dtu.AssetName != "")
+                workingInstance_name = dtu.AssetName;
+            workingInstance.name = workingInstance_name;
 
             var renderers = workingInstance.GetComponentsInChildren<Renderer>();
             if (renderers?.Length == 0)
             {
-                Debug.LogWarning("no renderers found for material remapping");
+                Debug.LogError("DazBridge: No renderers found for material remapping.");
                 return;
             }
 
@@ -768,6 +813,13 @@ namespace Daz3D
                             }
                             else
                             {
+                                Debug.LogError("DazBridge: No imported materials were found for material remapping");
+                                continue;
+
+                                /****
+                                 ** Everything below is old and broken.
+                                 ** Fbx exported from DazBridges no longer embed textures.
+                                 ****
                                 var shader = Shader.Find("HDRP/Lit");
 
                                 if (shader == null)
@@ -792,7 +844,7 @@ namespace Daz3D
 
                                 //Debug.Log("obj path " + path);
                                 AssetDatabase.CreateAsset(nuMat, matPath + "/Daz3D_" + keyMat.name + ".mat");
-
+                                */
                             }
 
                             dict.Add(keyMat, nuMat);
@@ -831,16 +883,28 @@ namespace Daz3D
             //write the prefab to the asset database
             // Make sure the file name is unique, in case an existing Prefab has the same name.
             var nuPrefabPathPath = Path.GetDirectoryName(modelPath);
-            nuPrefabPathPath = Path.Combine(nuPrefabPathPath, fbxPrefab.name + "_Prefab");
-            nuPrefabPathPath = AssetDatabase.GenerateUniqueAssetPath(nuPrefabPathPath);
+
+            //nuPrefabPathPath = Path.Combine(nuPrefabPathPath, fbxPrefab.name + "_Prefab");
+            //nuPrefabPathPath = AssetDatabase.GenerateUniqueAssetPath(nuPrefabPathPath);
+            //if (!Directory.Exists(nuPrefabPathPath))
+            //    Directory.CreateDirectory(nuPrefabPathPath);
+
+            nuPrefabPathPath = Path.Combine(nuPrefabPathPath, "Prefabs");
             if (!Directory.Exists(nuPrefabPathPath))
                 Directory.CreateDirectory(nuPrefabPathPath);
 
-            nuPrefabPathPath += "/Daz3D_" + fbxPrefab.name + ".prefab";
+            string prefabFilestem = fbxPrefab.name;
+            if (dtu.ProductComponentName != "")
+                prefabFilestem = Daz3D.Utilities.ScrubKey(dtu.ProductComponentName);
+            else if (dtu.AssetName != "")
+                prefabFilestem = Daz3D.Utilities.ScrubKey(dtu.AssetName);
+            nuPrefabPathPath += "/" + prefabFilestem + "_Prefab.prefab";
+            nuPrefabPathPath = AssetDatabase.GenerateUniqueAssetPath(nuPrefabPathPath);
 
             // For future refreshment
             var component = workingInstance.AddComponent<Daz3DInstance>();
             component.SourceFBX = fbxPrefab;
+
 
             // Create the new Prefab.
             var prefab = PrefabUtility.SaveAsPrefabAssetAndConnect(workingInstance, nuPrefabPathPath, InteractionMode.AutomatedAction);
@@ -884,7 +948,6 @@ namespace Daz3D
             if (foundCount > 0)
                 DestroyImmediate(workingInstance);
 
-
             ImportEventRecord pfbRecord = new ImportEventRecord();
             pfbRecord.AddToken("Created Unity Prefab: ");
             pfbRecord.AddToken(prefab.name, prefab);
@@ -892,8 +955,16 @@ namespace Daz3D
             pfbRecord.AddToken(resultingInstance.name, resultingInstance, ENDLINE);
             EventQueue.Enqueue(pfbRecord);
 
-            //highlight/select the object in the scene view
-            Selection.activeGameObject = resultingInstance;
+            if (Daz3DBridge.BatchConversionMode == 0)
+            {
+                //highlight/select the object in the scene view
+                Selection.activeGameObject = resultingInstance;
+            }
+            else if (Daz3DBridge.BatchConversionMode == 1)
+            { 
+                DestroyImmediate(resultingInstance);
+            }
+
         }
 
         private static void ImportDforceToPrefab(string key, Renderer renderer, GameObject workingInstance, Material keyMat)
@@ -913,20 +984,20 @@ namespace Daz3D
             )
             {
                 // TODO: implement dForce hair support
-                Debug.LogWarning("Unofficial DTU: ImportDforceToPrefab() dForce hair is currently not supported: " + parent.name);
+                Debug.LogWarning("Import Warning: ImportDforceToPrefab() dForce hair is currently not supported: " + parent.name);
                 return;
             }
 
             if (skinned == null)
             {
                 // TODO: check if regular mesh renderer and upgrade if appropriate
-                Debug.LogWarning("Unofficial DTU: ImportDforceToPrefab() gameojbect unsupported: it does not have a skinned mesh renderer: " + parent.name);
+                Debug.LogWarning("Import Warning: ImportDforceToPrefab() gameojbect unsupported: it does not have a skinned mesh renderer: " + parent.name);
                 return;
             }
             else if (skinned.sharedMesh.vertexCount > 40000)
             {
                 int numverts = skinned.sharedMesh.vertexCount;
-                Debug.LogWarning("Unofficial DTU: ImportDforceToPrefab() gameojbect unsupported: too many vertices: " + parent.name + " (" + numverts.ToString() + ")");
+                Debug.LogWarning("Import Warning: ImportDforceToPrefab() gameojbect unsupported: too many vertices: " + parent.name + " (" + numverts.ToString() + ")");
                 return;
 
             }

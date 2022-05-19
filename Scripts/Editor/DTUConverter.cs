@@ -1,4 +1,8 @@
-﻿using System.Collections.Generic;
+﻿#define USING_HDRP
+#define USING_HARDCODED_RENDERPIPELINE
+
+
+using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using UnityEngine;
 using UnityEditor;
@@ -13,22 +17,15 @@ namespace Daz3D
 		public const string shaderNameIraySkin = "Daz3D/IrayUberSkin";
 		public const string shaderNameHair = "Daz3D/Hair";
 		public const string shaderNameWet = "Daz3D/Wet";
-		public const string newShaderNameBase = "Daz3D/Unofficial DTU/uDTU HDRP.";
+		public const string newShaderNameBase = "Daz3D/uDTU HDRP.";
 #elif USING_URP
-		public const string shaderNameMetal = "Daz3D/URP IrayUberMetal";
-		public const string shaderNameSpecular = "Daz3D/URP IrayUberSpec";
-		public const string shaderNameIraySkin = "Daz3D/URP IrayUberSkin";
-		public const string shaderNameHair = "Daz3D/URP Hair";
-		public const string shaderNameWet = "Daz3D/URP Wet";
-		public const string newShaderNameBase = "Daz3D/Unofficial DTU/uDTU URP.";
+		public const string shaderNameMetal = "";
+		public const string shaderNameSpecular = "";
+		public const string shaderNameIraySkin = "";
+		public const string shaderNameHair = "";
+		public const string shaderNameWet = "Daz3D/uDTU URP.Transparent";
+		public const string newShaderNameBase = "Daz3D/uDTU URP.";
 #elif USING_BUILTIN
-		public const string shaderNameMetal = "Daz3D/Built-In IrayUberMetal";
-		public const string shaderNameSpecular = "Daz3D/Built-In IrayUberSpec";
-		public const string shaderNameIraySkin = "Daz3D/Built-In IrayUberSkin";
-		public const string shaderNameHair = "Daz3D/Built-In Hair";
-		public const string shaderNameWet = "Daz3D/Built-In Wet";
-		public const string newShaderNameBase = "";
-#else
 		public const string shaderNameMetal = "Standard";
 		public const string shaderNameSpecular = "Standard";
 		public const string shaderNameIraySkin = "Standard";
@@ -70,9 +67,14 @@ namespace Daz3D
 		public string AssetID;
 		public string AssetName;
 		public string AssetType;
+		public string ProductName;
+		public string ProductComponentName;
 		public string FBXFile;
 		public string ImportFolder;
 		public List<DTUMaterial> Materials;
+
+		public bool UseSharedTextureDir;
+		public bool UseSharedMaterialDir;
 
 		//DiffusionProfile is sealed in older versions of HDRP, will need to use reflection if we want access to it
 		//public UnityEngine.Rendering.HighDefinition.DiffusionProfile diffusionProfile = null;
@@ -91,6 +93,7 @@ namespace Daz3D
 			OmUberSurface,
 			OOTHairblendingHair,
 			BlendedDualLobeHair, //used in some dforce hairs
+			LittleFoxHair,
 		}
 
 		/// <summary>
@@ -273,6 +276,9 @@ namespace Daz3D
 		/// <param name="hasGlossyColor"></param>
 		public void ToggleCommonMaterialProperties(ref Material mat, string matNameLower, bool isTransparent = false, bool isDoubleSided = false, bool hasDualLobeSpecularWeight = false, bool hasDualLobeSpecularReflectivity = false, int sortingPriority = 0, bool hasGlossyLayeredWeight=false, bool hasGlossyColor=false)
 		{
+#if USING_STANDARD_SHADER
+			return;
+#endif
 			if(isTransparent)
 			{
 				mat.SetFloat("_ZWrite",0f);
@@ -297,7 +303,7 @@ namespace Daz3D
 				mat.SetFloat("_TransparentZWrite",1f);
 				mat.SetFloat("_ZTestGBuffer",5f);
 				mat.SetFloat("_SurfaceType",0f);
-				mat.SetFloat("_AlphaCutoffEnable",0f);
+//				mat.SetFloat("_AlphaCutoffEnable",0f);
 				mat.SetFloat("_AlphaDstBlend",0f);
 				mat.SetFloat("_DstBlend",0f);
 
@@ -308,6 +314,9 @@ namespace Daz3D
 
 				mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Geometry + sortingPriority;
 			}
+			// 2022-Feb-04 (DB): AlphaCutoff enabled in both Transparent and Opaque surface types
+			mat.SetFloat("_AlphaCutoffEnable", 1f);
+//			mat.EnableKeyword("_ALPHATEST_ON");
 
 
 			mat.SetShaderPassEnabled("MOTIONVECTORS",false);
@@ -388,9 +397,9 @@ namespace Daz3D
 		///  for other shaders see the base conversion ConvertToUnity
 		/// </summary>
 		/// <param name="dtuMaterial"></param>
-		/// <param name="materialDir"></param>
+		/// <param name="textureDir"></param>
 		/// <returns></returns>
-		public Material ConvertToUnityIrayUber(DTUMaterial dtuMaterial, string materialDir)
+		public Material ConvertToUnityIrayUber(DTUMaterial dtuMaterial, string textureDir)
 		{
 			// We have a few branches we're going to go down and filter out to the following shaders
 			//  IrayUberMetal - Used if we can safely assume this is a material of base mix metal/rough and no translucency/skin detected
@@ -566,10 +575,11 @@ namespace Daz3D
 			var specularLobe2Glossiness = dtuMaterial.Get("Specular Lobe 2 Glossiness");
 			var dualLobeSpecularRatio = dtuMaterial.Get("Dual Lobe Specular Ratio");
 
+			// NOTE: Glossy* Properties do not exist in PBRSkin shader
 			var glossyLayeredWeight = dtuMaterial.Get("Glossy Layered Weight");
 			var glossyWeight = dtuMaterial.Get("Glossy Weight");
 			var glossyColor = dtuMaterial.Get("Glossy Color");
-			var glossyRoughness = dtuMaterial.Get("Glossy Roughness", new DTUValue(1.0f));
+			var glossyRoughness = dtuMaterial.Get("Glossy Roughness", new DTUValue(0.5f));
 			var glossySpecular = dtuMaterial.Get("Glossy Specular");
 			var glossiness = dtuMaterial.Get("Glossiness");
 			var anisotropy = dtuMaterial.Get("Glossy Anisotropy");
@@ -592,6 +602,21 @@ namespace Daz3D
 			float rotatedGlossiness = glossiness.Float + rotationModifier;
 			if (rotatedGlossiness > 1.0f) rotatedGlossiness = 2.0f - rotatedGlossiness;
 			rotatedGlossiness = anisotropy.Float * rotatedGlossiness + (1 - anisotropy.Float) * glossiness.Float;
+
+			// Monique 8 compatibility
+			if (glossyLayeredWeight.Float == 0f && dualLobeSpecularWeight.Float > 0f)
+			{
+#if USING_HDRP || USING_URP
+				glossyRoughness.Value = new DTUValue(1.0f);
+				rotatedRoughness = 1.0f;
+#elif USING_STANDARD_SHADER
+				glossyRoughness = specularLobe1Roughness;
+#endif
+			}
+
+			// PBRSkin shader compatibility
+			if (dtuMaterial.HasProperty("Glossy Roughness") == false)
+				glossyRoughness = diffuseRougness;
 
 			var refractionIndex = dtuMaterial.Get("Refraction Index");
 			var refractionWeight = dtuMaterial.Get("Refraction Weight");
@@ -693,7 +718,7 @@ namespace Daz3D
 
 			if(isHair)
 			{
-				if (Daz3DDTUImporter.UseNewShaders)
+				if (Daz3DDTUImporter.UseLegacyShaders==false)
 					shaderName = DTU_Constants.newShaderNameBase + "Hair";
 				else
 					shaderName = DTU_Constants.shaderNameHair;
@@ -703,7 +728,7 @@ namespace Daz3D
 				//if we're skin, force a specular workflow as well
 				isSpecular = true;
 				// DB 2021-09-22
-				if (Daz3DDTUImporter.UseNewShaders)
+				if (Daz3DDTUImporter.UseLegacyShaders==false)
 					shaderName = DTU_Constants.newShaderNameBase + "SSS";
 				else
 					shaderName = DTU_Constants.shaderNameIraySkin;
@@ -713,7 +738,11 @@ namespace Daz3D
 			}
 			else if(isWet)
 			{
+#if USING_STANDARD_SHADER
+				shaderName = DTU_Constants.shaderNameInvisible;
+#else
 				shaderName = DTU_Constants.shaderNameWet;
+#endif
 			}
 			else
 			{
@@ -730,7 +759,7 @@ namespace Daz3D
                     isSpecular = true;
 
                     // DB 2021-09-22: If Translucent, then use the SSS shader
-                    if (Daz3DDTUImporter.UseNewShaders)
+                    if (Daz3DDTUImporter.UseLegacyShaders==false)
                     {
 						if (!isTransparent)
 							shaderName = DTU_Constants.newShaderNameBase + "SSS";
@@ -743,7 +772,7 @@ namespace Daz3D
 				else if(isSpecular)
 				{
 					// DB 2021-09-22
-					if (Daz3DDTUImporter.UseNewShaders)
+					if (Daz3DDTUImporter.UseLegacyShaders==false)
 						shaderName = DTU_Constants.newShaderNameBase + "Specular";
 					else
 						shaderName = DTU_Constants.shaderNameSpecular;
@@ -751,7 +780,7 @@ namespace Daz3D
 				else if(isMetal)
 				{
 					// DB 2021-09-22
-					if (Daz3DDTUImporter.UseNewShaders)
+					if (Daz3DDTUImporter.UseLegacyShaders==false)
 						shaderName = DTU_Constants.newShaderNameBase + "Metallic";
 					else
 						shaderName = DTU_Constants.shaderNameMetal;
@@ -762,7 +791,7 @@ namespace Daz3D
 				}
 #if USING_URP
 				// DB 2021-09-28: URP needs hardcoded transparency shader mode, so this block is needed to override everything above
-				if(isTransparent && Daz3DDTUImporter.UseNewShaders)
+				if(isTransparent && Daz3DDTUImporter.UseLegacyShaders==false)
                 {
 					shaderName = DTU_Constants.newShaderNameBase + "Transparent";
 				}
@@ -805,26 +834,60 @@ namespace Daz3D
 			{
 				//Hairs are pretty simple b/c we only care about a few properties, so we're forking here to deal with it
 				isDoubleSided = true;
-				isTransparent = true;
+				// 2022-Feb-04 (DB): hardcode from isTransparent=true back to isTransparent=false to fix zsorting problems with hair vs cap, etc
+				isTransparent = false;
 
+#if USING_STANDARD_SHADER
+				mat.renderQueue = 2450;
+				mat.EnableKeyword("_ALPHATEST_ON");
+				mat.SetFloat("_Mode", 1.0f); // Set Cutout rendering mode
+				mat.SetFloat("_Cutoff", 0.35f);
+				if (cutoutOpacity.TextureExists())
+					mat.SetTexture("_MainTex", ImportTextureFromPath(cutoutOpacity.Texture, textureDir, record, false, true, true));
+
+				mat.SetColor("_Color", diffuseColor.Color);
+				if (diffuseColor.TextureExists())
+					mat.SetTexture("_MainTex", ImportTextureFromPath(diffuseColor.Texture, textureDir, record));
+
+				if (normalMap.TextureExists())
+				{
+					mat.EnableKeyword("_NORMALMAP");
+					mat.SetTexture("_BumpMap", ImportTextureFromPath(normalMap.Texture, textureDir, record, true));
+					mat.SetFloat("_BumpScale", normalMap.Float);
+				}
+				else
+				{
+					mat.DisableKeyword("_NORMALMAP");
+				}
+				if (bumpStrength.TextureExists())
+				{
+					mat.EnableKeyword("_PARALLAXMAP");
+					mat.SetFloat("_Parallax", bumpStrength.Float / 400.0f);
+					mat.SetTexture("_ParallaxMap", ImportTextureFromPath(bumpStrength.Texture, textureDir, record, false, true));
+				}
+				else
+				{
+					mat.DisableKeyword("_PARALLAXMAP");
+				}
+#else
 				mat.SetColor("_Diffuse",diffuseColor.Color);
-				mat.SetTexture("_DiffuseMap",ImportTextureFromPath(diffuseColor.Texture,materialDir, record));
-				mat.SetTexture("_NormalMap",ImportTextureFromPath(normalMap.Texture,materialDir, record, true));
+				mat.SetTexture("_DiffuseMap",ImportTextureFromPath(diffuseColor.Texture, textureDir, record));
+				mat.SetTexture("_NormalMap",ImportTextureFromPath(normalMap.Texture, textureDir, record, true));
 				if (normalMap.Texture == "")
 					mat.SetFloat("_NormalStrength", 0.5f);
 				else
 					mat.SetFloat("_NormalStrength", normalMap.Float);
 				mat.SetFloat("_Height",bumpStrength.Float);
-				mat.SetTexture("_HeightMap",ImportTextureFromPath(bumpStrength.Texture,materialDir, record, false, true));
+				mat.SetTexture("_HeightMap",ImportTextureFromPath(bumpStrength.Texture, textureDir, record, false, true));
 				mat.SetFloat("_HeightOffset",0.25f);
 #if USING_HDRP || USING_URP
-				mat.SetTexture("_CutoutOpacityMap",ImportTextureFromPath(cutoutOpacity.Texture,materialDir, record, false, true));
+				mat.SetTexture("_CutoutOpacityMap",ImportTextureFromPath(cutoutOpacity.Texture, textureDir, record, false, true));
 #elif USING_BUILTIN
 				mat.SetFloat("_Alpha", cutoutOpacity.Float);
-				mat.SetTexture("_AlphaMap", ImportTextureFromPath(cutoutOpacity.Texture, materialDir, record, false, true));
+				mat.SetTexture("_AlphaMap", ImportTextureFromPath(cutoutOpacity.Texture, textureDir, record, false, true));
 #endif
 
-				mat.SetTexture("_GlossyRoughnessMap",ImportTextureFromPath(glossyRoughness.Texture,materialDir, record, false, true));
+				mat.SetTexture("_GlossyRoughnessMap",ImportTextureFromPath(glossyRoughness.Texture, textureDir, record, false, true));
 //				mat.SetFloat("_GlossyRoughness",glossyRoughness.Float);
 				mat.SetFloat("_GlossyRoughness",rotatedRoughness); // faked Glossy Anisotropy Rotations (see above)
 
@@ -848,6 +911,7 @@ namespace Daz3D
 				mat.SetFloat("_AlphaClipThreshold", 0.35f);
 #endif
 				mat.SetFloat("_AlphaPower",1.0f);
+#endif // USING_STANDARD_SHADER
 			}
 			else if(isWet)
 			{
@@ -860,9 +924,9 @@ namespace Daz3D
 				//TODO: we can pull data from the existing object, but for now these values work well
 				mat.SetFloat("_Smoothness",0.97f);
 				mat.SetFloat("_Normal",normalMap.Float);
-				mat.SetTexture("_NormalMap",ImportTextureFromPath(normalMap.Texture,materialDir, record, true));
+				mat.SetTexture("_NormalMap",ImportTextureFromPath(normalMap.Texture, textureDir, record, true));
 				mat.SetFloat("_Height",bumpStrength.Float);
-				mat.SetTexture("_HeightMap",ImportTextureFromPath(bumpStrength.Texture,materialDir, record, false,true));
+				mat.SetTexture("_HeightMap",ImportTextureFromPath(bumpStrength.Texture, textureDir, record, false,true));
 				mat.SetFloat("_HeightOffset",0.25f);
 			}
 			else // custom material handling
@@ -875,21 +939,44 @@ namespace Daz3D
 				//These properties are going to be parsed/interpretted in roughly the order that they appear in the table of iray props in the large comment block
 
 				//Diffuse affects color, and it's handled the same in every path and shader we have
+#if USING_STANDARD_SHADER
+				mat.SetColor("_Color", diffuseColor.Color);
+				if (diffuseColor.TextureExists())
+				{
+					var tex = ImportTextureFromPath(diffuseColor.Texture, textureDir, record);
+					mat.SetTexture("_MainTex", tex);
+				}
+#else
 				mat.SetColor("_Diffuse",diffuseColor.Color);
 				if(diffuseColor.TextureExists())
 				{
-					var tex = ImportTextureFromPath(diffuseColor.Texture,materialDir, record);
+					var tex = ImportTextureFromPath(diffuseColor.Texture, textureDir, record);
 					mat.SetTexture("_DiffuseMap",tex);
 				}
-
+#endif
 				// DB 2021-09-25: Metallic properties set for all shading modes, this let's the shadergraph variant
 				//    decide how to handle the metallic property -- either passing it directly to hardware or pre-process / emulate as needed.
+#if USING_STANDARD_SHADER
+				if (metallicWeight.TextureExists())
+				{
+					mat.EnableKeyword("_METALLICGLOSSMAP");
+					mat.SetFloat("_Metallic", metallicWeight.Float);
+					mat.SetTexture("_MetallicGlossMap", ImportTextureFromPath(metallicWeight.Texture, textureDir, record, false, true, true));
+				}
+				else if (glossyRoughness.TextureExists())
+                {
+					mat.EnableKeyword("_METALLICGLOSSMAP");
+					mat.SetTexture("_MetallicGlossMap", ImportTextureFromPath(glossyRoughness.Texture, textureDir, record, false, true, true));
+				}
+
+#else
 				mat.SetFloat("_Metallic", metallicWeight.Float);
 				if (metallicWeight.TextureExists())
 				{
-					var tex = ImportTextureFromPath(metallicWeight.Texture, materialDir, record, false, true);
+					var tex = ImportTextureFromPath(metallicWeight.Texture, textureDir, record, false, true);
 					mat.SetTexture("_MetallicMap", tex);
 				}
+#endif
 				////Metallic Weight affects the metalness and is only used with PBR Metal
 				////If we're usign a metal workflow...
 				//if (isMetal)
@@ -898,7 +985,7 @@ namespace Daz3D
 				//	mat.SetFloat("_Metallic", metallicWeight.Float);
 				//	if(metallicWeight.TextureExists())
 				//	{
-				//		var tex = ImportTextureFromPath(metallicWeight.Texture,materialDir, record, false,true);
+				//		var tex = ImportTextureFromPath(metallicWeight.Texture, textureDir, record, false,true);
 				//		mat.SetTexture("_MetallicMap",tex);
 				//	}
 				//}
@@ -940,7 +1027,7 @@ namespace Daz3D
 					mat.SetColor("_TranslucencyColor",translucencyColor.Color);
 					if(translucencyColor.TextureExists())
 					{
-						var tex = ImportTextureFromPath(translucencyColor.Texture,materialDir, record);
+						var tex = ImportTextureFromPath(translucencyColor.Texture, textureDir, record);
 						mat.SetTexture("_TranslucencyColorMap",tex);
 					}
 				}
@@ -966,9 +1053,9 @@ namespace Daz3D
 
 					if(mat.HasProperty("_DualLobeSpecularWeight")){
 						mat.SetFloat("_DualLobeSpecularWeight",dualLobeSpecularWeight.Float);
-						//mat.SetTexture("_DualLobeSpecularWeightMap",ImportTextureFromPath(dualLobeSpecularWeight.Texture,materialDir));
+						//mat.SetTexture("_DualLobeSpecularWeightMap",ImportTextureFromPath(dualLobeSpecularWeight.Texture, textureDir));
 						mat.SetFloat("_DualLobeSpecularReflectivity",dualLobeSpecularReflectivity.Float);
-						mat.SetTexture("_DualLobeSpecularReflectivityMap",ImportTextureFromPath(dualLobeSpecularReflectivity.Texture,materialDir,record,false,true));
+						mat.SetTexture("_DualLobeSpecularReflectivityMap",ImportTextureFromPath(dualLobeSpecularReflectivity.Texture, textureDir, record,false,true));
 
 						float specularLobe1RoughnessValue = 0f;
 						float specularLobe2RoughnessValue = 0f;
@@ -981,16 +1068,16 @@ namespace Daz3D
 							specularLobe2RoughnessValue = 1.0f - specularLobe2Glossiness.Float;
 
 							//In our gloss shader, ensure we do a one minus on this
-							specularLobe1RoughnessTexture = ImportTextureFromPath(specularLobe1Glossiness.Texture,materialDir,record,false,true);
-							specularLobe2RoughnessTexture = ImportTextureFromPath(specularLobe2Glossiness.Texture,materialDir,record,false,true);
+							specularLobe1RoughnessTexture = ImportTextureFromPath(specularLobe1Glossiness.Texture, textureDir, record,false,true);
+							specularLobe2RoughnessTexture = ImportTextureFromPath(specularLobe2Glossiness.Texture, textureDir, record,false,true);
 						}
 						else
 						{
 							specularLobe1RoughnessValue = specularLobe1Roughness.Float;
 							specularLobe2RoughnessValue = specularLobe2Roughness.Float;
 
-							specularLobe1RoughnessTexture = ImportTextureFromPath(specularLobe1Roughness.Texture,materialDir,record,false,true);
-							specularLobe2RoughnessTexture = ImportTextureFromPath(specularLobe2Roughness.Texture,materialDir,record,false,true);
+							specularLobe1RoughnessTexture = ImportTextureFromPath(specularLobe1Roughness.Texture, textureDir, record,false,true);
+							specularLobe2RoughnessTexture = ImportTextureFromPath(specularLobe2Roughness.Texture, textureDir, record,false,true);
 						}
 
 						// DB (2021-05-4): temporary hack to map PBRSkin DualLobSpecular properties to IrayUber Shader
@@ -1000,8 +1087,8 @@ namespace Daz3D
 							specularLobe2Roughness = dtuMaterial.Get("Specular Lobe 2 Roughness Mult");
 							specularLobe2RoughnessValue = specularLobe2Roughness.Float;
 
-							specularLobe1RoughnessTexture = ImportTextureFromPath(specularLobe1Roughness.Texture, materialDir, record, false, true);
-							specularLobe2RoughnessTexture = ImportTextureFromPath(specularLobe2Roughness.Texture, materialDir, record, false, true);
+							specularLobe1RoughnessTexture = ImportTextureFromPath(specularLobe1Roughness.Texture, textureDir, record, false, true);
+							specularLobe2RoughnessTexture = ImportTextureFromPath(specularLobe2Roughness.Texture, textureDir, record, false, true);
 
 						}
 
@@ -1034,7 +1121,7 @@ namespace Daz3D
 				//	glossyRoughnessValue = glossyRoughness.Float;
 				//	if(glossyRoughness.TextureExists())
 				//	{
-				//		glossyRoughessMap = ImportTextureFromPath(glossyRoughness.Texture,materialDir,record,false,true);
+				//		glossyRoughessMap = ImportTextureFromPath(glossyRoughness.Texture,textureDir,record,false,true);
 				//	}
 				//                if (baseMixing == DTUBaseMixing.Weighted)
 				//                {
@@ -1050,11 +1137,11 @@ namespace Daz3D
 				// DB 2021-09-07: The code block below overrides some or all of the code block above.
 				//   I don't know if the intention was to have the section below replace the one above
 				//   or to do something else entirely.
-//				glossyRoughnessValue = glossyRoughness.Float;
+				//				glossyRoughnessValue = glossyRoughness.Float;
 				glossyRoughnessValue = rotatedRoughness; // faked Glossy Anisotropy Rotations (see above)
 				if (glossyRoughness.TextureExists())
 				{
-					glossyRoughessMap = ImportTextureFromPath(glossyRoughness.Texture, materialDir, record, false, true);
+					glossyRoughessMap = ImportTextureFromPath(glossyRoughness.Texture, textureDir, record, false, true);
 				}
 				mat.SetFloat("_GlossyLayeredWeight", glossyLayeredWeight.Float);
 
@@ -1071,12 +1158,12 @@ namespace Daz3D
 						glossyRoughnessValue = rotatedGlossiness; // faked Glossy Anisotropy Rotations (see above)
 						if (glossyRoughness.TextureExists())
                         {
-							glossyRoughessMap = ImportTextureFromPath(glossiness.Texture, materialDir, record, false, true);
+							glossyRoughessMap = ImportTextureFromPath(glossiness.Texture, textureDir, record, false, true);
 						}
 						// DB 2021-09-23: disabled Lerp and LayerWeight, now done in shader
 						//glossyRoughnessValue = 1f - (glossiness.Float * glossyLayeredWeight.Float);
 						//this is an inverted map where 1 is smooth and 0 is rough
-						//glossinessMap = ImportTextureFromPath(glossiness.Texture,materialDir,record,false,true);
+						//glossinessMap = ImportTextureFromPath(glossiness.Texture,textureDir,record,false,true);
 						//glossinessValue = glossiness.Float * glossyLayeredWeight.Float;
 						break;
 					case DTUBaseMixing.Weighted:
@@ -1097,15 +1184,17 @@ namespace Daz3D
 						//if(glossyWeight.TextureExists())
 						//{
 						//	//this is an inverted map where 1 is smooth and 0 is rough
-						//	glossinessMap = ImportTextureFromPath(glossyWeight.Texture,materialDir,record,false,true);
+						//	glossinessMap = ImportTextureFromPath(glossyWeight.Texture,textureDir,record,false,true);
 						//	glossinessValue = glossyWeight.Float;
 						//}
 						break;
 				}
 
 				var alpha = cutoutOpacity.Float;
-				if(refractionWeight.Float > 0f){
-					switch(baseMixing){
+				if (refractionWeight.Float > 0f)
+				{
+					switch (baseMixing)
+					{
 						case DTUBaseMixing.PBRMetalRoughness:
 							alpha *= 1f - refractionWeight.Float;
 							glossyRoughnessValue *= refractionRoughness.Float;
@@ -1119,15 +1208,21 @@ namespace Daz3D
 
 				//This is only useful for clipping or transparent assets
 				mat.SetFloat("_Alpha",alpha);
-				mat.SetTexture("_AlphaMap",ImportTextureFromPath(cutoutOpacity.Texture,materialDir,record,false,true));
+				mat.SetTexture("_AlphaMap",ImportTextureFromPath(cutoutOpacity.Texture, textureDir, record,false,true));
 
+#if USING_STANDARD_SHADER
+				if (glossyRoughnessValue < 0.2f) glossyRoughnessValue = 0.2f;
+				mat.SetFloat("_Glossiness", glossyRoughnessValue);
+//				mat.SetTexture("_SpecGlossMap",glossyRoughessMap);
+#else
 				mat.SetFloat("_Roughness",glossyRoughnessValue);
 				mat.SetTexture("_RoughnessMap",glossyRoughessMap);
+#endif
 
 				if(isSpecular)
 				{
 					mat.SetColor("_SpecularColor",glossySpecular.Color);
-					mat.SetTexture("_SpecularColorMap",ImportTextureFromPath(glossySpecular.Texture,materialDir, record));
+					mat.SetTexture("_SpecularColorMap",ImportTextureFromPath(glossySpecular.Texture, textureDir, record));
 					//mat.SetFloat("_Glossiness",glossinessValue);
 					//mat.SetTexture("_GlossinessMap",glossinessMap);
 				}
@@ -1141,12 +1236,36 @@ namespace Daz3D
 
 
 				//bump maps are like old school black/white bump maps, so we'll either plug them in directly or blend them into the normal map
+#if USING_STANDARD_SHADER
+				if (bumpStrength.TextureExists())
+                {
+					mat.EnableKeyword("_PARALLAXMAP");
+					mat.SetFloat("_Parallax", bumpStrength.Float / 400.0f);
+					mat.SetTexture("_ParallaxMap", ImportTextureFromPath(bumpStrength.Texture, textureDir, record, false, true));
+				}
+				else
+                {
+					mat.DisableKeyword("_PARALLAXMAP");
+				}
+#else
 				mat.SetFloat("_Height",bumpStrength.Float);
-				mat.SetTexture("_HeightMap",ImportTextureFromPath(bumpStrength.Texture,materialDir,record,false,true));
-
+				mat.SetTexture("_HeightMap",ImportTextureFromPath(bumpStrength.Texture, textureDir, record, false, true));
+#endif
+#if USING_STANDARD_SHADER
+				if (normalMap.TextureExists())
+                {
+					mat.EnableKeyword("_NORMALMAP");
+					mat.SetFloat("_BumpScale", normalMap.Float);
+					mat.SetTexture("_BumpMap", ImportTextureFromPath(normalMap.Texture, textureDir, record, true));
+				}
+				else
+                {
+					mat.DisableKeyword("_NORMALMAP");
+				}
+#else
 				mat.SetFloat("_Normal",normalMap.Float);
-				mat.SetTexture("_NormalMap",ImportTextureFromPath(normalMap.Texture,materialDir,record,true));
-
+				mat.SetTexture("_NormalMap",ImportTextureFromPath(normalMap.Texture, textureDir, record,true));
+#endif
 				// ---//right now we're ignoring top coats
 				// DB 2021-09-22: TopCoat implementation
 				mat.SetFloat("_TopCoatWeight", topCoatWeight.Float * 0.5f);
@@ -1154,8 +1273,22 @@ namespace Daz3D
 				mat.SetFloat("_TopCoatIOR", topCoatIOR.Float);
 				mat.SetColor("_TopCoatColor", topCoatColor.Color);
 
+#if USING_STANDARD_SHADER
+				if (emissionColor.TextureExists() || emissionColor.Color != Color.black)
+                {
+					mat.EnableKeyword("_EMISSION");
+					mat.SetColor("_EmissionColor", emissionColor.Color);
+					mat.SetTexture("_EmissionMap", ImportTextureFromPath(emissionColor.Texture, textureDir, record));
+				}
+				else
+                {
+					mat.DisableKeyword("_EMISSION");
+				}
+#else
 				mat.SetColor("_Emission",emissionColor.Color);
-				mat.SetTexture("_EmissionMap",ImportTextureFromPath(emissionColor.Texture,materialDir, record));
+				mat.SetTexture("_EmissionMap",ImportTextureFromPath(emissionColor.Texture, textureDir, record));
+#endif
+
 
 				// DB 2021-09-02: EmissionStrength and Weight
 				if (emissionColor.Exists && emissionColor.Color != Color.black && luminance.Exists)
@@ -1181,11 +1314,6 @@ namespace Daz3D
 
 			ToggleCommonMaterialProperties(ref mat,matNameLower,isTransparent,isDoubleSided, hasDualLobeSpecularWeight, hasDualLobeSpecularReflectivity,sortingPriority,hasGlossyLayeredWeight,hasGlossyColor);
 
-
-
-
-
-
 			if(isSpecular)
 			{
 				mat.EnableKeyword("IRAYUBER_GLOSSYCOLORACTIVE");
@@ -1205,9 +1333,8 @@ namespace Daz3D
 		/// </summary>
 		/// <param name="dTUMaterial"></param>
 		/// <returns></returns>
-		public Material ConvertToUnityDazStudioDefault(DTUMaterial dtuMaterial, string materialDir)
+		public Material ConvertToUnityDazStudioDefault(DTUMaterial dtuMaterial, string textureDir)
 		{
-
 			var lightingModel = dtuMaterial.Get("Lighting Model");
 			var diffuseColor = dtuMaterial.Get("Diffuse Color");
 			var diffuseStrength = dtuMaterial.Get("Diffuse Strength");
@@ -1294,13 +1421,13 @@ namespace Daz3D
 			switch(shaderLightingModel)
 			{
 				case DTULightingModel.Skin:
-					if (Daz3DDTUImporter.UseNewShaders)
+					if (Daz3DDTUImporter.UseLegacyShaders==false)
 						shaderName = DTU_Constants.newShaderNameBase + "SSS";
 					else
 						shaderName = DTU_Constants.shaderNameIraySkin;
 					break;
 				default:
-					if (Daz3DDTUImporter.UseNewShaders)
+					if (Daz3DDTUImporter.UseLegacyShaders==false)
 						shaderName = DTU_Constants.newShaderNameBase + "Specular";
 					else
 						shaderName = DTU_Constants.shaderNameSpecular;
@@ -1311,7 +1438,11 @@ namespace Daz3D
 
 			if(isWet)
 			{
+#if USING_STANDARD_SHADER
+				shaderName = DTU_Constants.shaderNameInvisible;
+#else
 				shaderName = DTU_Constants.shaderNameWet;
+#endif
 			}
 
 			var shader = Shader.Find(shaderName);
@@ -1349,9 +1480,9 @@ namespace Daz3D
 				//TODO: we can pull data from the existing object, but for now these values work well
 				mat.SetFloat("_Smoothness",0.97f);
 				mat.SetFloat("_Normal",normalMap.Float);
-				mat.SetTexture("_NormalMap",ImportTextureFromPath(normalMap.Texture,materialDir, record, true));
+				mat.SetTexture("_NormalMap",ImportTextureFromPath(normalMap.Texture, textureDir, record, true));
 				mat.SetFloat("_Height",bumpStrength.Float);
-				mat.SetTexture("_HeightMap",ImportTextureFromPath(bumpStrength.Texture,materialDir, record, false,true));
+				mat.SetTexture("_HeightMap",ImportTextureFromPath(bumpStrength.Texture, textureDir, record, false,true));
 				mat.SetFloat("_HeightOffset",0.25f);
 			}
 			else
@@ -1359,17 +1490,17 @@ namespace Daz3D
 
 
 				mat.SetColor("_Diffuse",diffuseColor.Color);
-				mat.SetTexture("_DiffuseMap",ImportTextureFromPath(diffuseColor.Texture,materialDir,record));
+				mat.SetTexture("_DiffuseMap",ImportTextureFromPath(diffuseColor.Texture, textureDir, record));
 
 				//glossiness seems to have no real effect, so we'll just set everything to being rough
 				mat.SetFloat("_Roughness",1.0f);
 
-				mat.SetTexture("_NormalMap",ImportTextureFromPath(normalMap.Texture,materialDir, record, true));
+				mat.SetTexture("_NormalMap",ImportTextureFromPath(normalMap.Texture, textureDir, record, true));
 				mat.SetFloat("_NormalStrength",normalMap.Float);
 				mat.SetFloat("_Height",bumpStrength.Float);
-				mat.SetTexture("_HeightMap",ImportTextureFromPath(bumpStrength.Texture,materialDir, record, false, true));
+				mat.SetTexture("_HeightMap",ImportTextureFromPath(bumpStrength.Texture, textureDir, record, false, true));
 				mat.SetFloat("_HeightOffset",0.25f);
-				mat.SetTexture("_AlphaMap",ImportTextureFromPath(opacityStrength.Texture,materialDir, record, false, true));
+				mat.SetTexture("_AlphaMap",ImportTextureFromPath(opacityStrength.Texture, textureDir, record, false, true));
 				mat.SetFloat("_Alpha",opacityStrength.Float);
 
 
@@ -1378,18 +1509,18 @@ namespace Daz3D
 					var specularColorValue = specularColor.Color;
 					specularColorValue = Color.Lerp(Color.black,specularColorValue,specularStrength.Float);
 					mat.SetColor("_SpecularColor",specularColorValue);
-					mat.SetTexture("_SpecularColorMap",ImportTextureFromPath(specularColor.Texture,materialDir, record));
+					mat.SetTexture("_SpecularColorMap",ImportTextureFromPath(specularColor.Texture, textureDir, record));
 
 					mat.SetFloat("_SpecularStrength",specularStrength.Float);
-					mat.SetTexture("_SpecularStrengthMap",ImportTextureFromPath(specularStrength.Texture,materialDir,record,false,true));
+					mat.SetTexture("_SpecularStrengthMap",ImportTextureFromPath(specularStrength.Texture, textureDir, record,false,true));
 				}
 
-				//mat.SetTexture("_AmbientOcclusionMap",ImportTextureFromPath(ambientColor.Texture,materialDir,record, false, true));
+				//mat.SetTexture("_AmbientOcclusionMap",ImportTextureFromPath(ambientColor.Texture,textureDir,record, false, true));
 
-				if(shaderLightingModel == DTULightingModel.Skin)
+				if (shaderLightingModel == DTULightingModel.Skin)
 				{
 					//Sheen, Scatter, Thickness
-					mat.SetTexture("_ThicknessMap",ImportTextureFromPath(thickness.Texture,materialDir,record,false,true));
+					mat.SetTexture("_ThicknessMap",ImportTextureFromPath(thickness.Texture, textureDir, record,false,true));
 				}
 
 
@@ -1397,7 +1528,7 @@ namespace Daz3D
 				{
 					var emissionColorValue = ambientColor.Color;
 
-					mat.SetTexture("_EmissionMap",ImportTextureFromPath(ambientColor.Texture,materialDir,record));
+					mat.SetTexture("_EmissionMap",ImportTextureFromPath(ambientColor.Texture, textureDir, record));
 
 					if(mat.HasProperty("_EmissionStrength"))
 					{
@@ -1407,7 +1538,7 @@ namespace Daz3D
 
 						if(mat.HasProperty("_EmissionStrengthMap"))
 						{
-							mat.SetTexture("_EmissionStrengthMap",ImportTextureFromPath(ambientStrength.Texture,materialDir,record,false,true));
+							mat.SetTexture("_EmissionStrengthMap",ImportTextureFromPath(ambientStrength.Texture, textureDir, record,false,true));
 						}
 					}
 					else
@@ -1424,7 +1555,7 @@ namespace Daz3D
 			if(cutoutOpacity.Exists && cutoutOpacity.TextureExists())
 			{
 				mat.SetFloat("_Alpha",cutoutOpacity.Float);
-				mat.SetTexture("_AlphaMap",ImportTextureFromPath(cutoutOpacity.Texture,materialDir, record, false, true));
+				mat.SetTexture("_AlphaMap",ImportTextureFromPath(cutoutOpacity.Texture, textureDir, record, false, true));
 			}
 
 
@@ -1461,7 +1592,7 @@ namespace Daz3D
 		/// </summary>
 		/// <param name="dTUMaterial"></param>
 		/// <returns></returns>
-		public Material ConvertToUnityPBRSP(DTUMaterial dtuMaterial, string materialDir)
+		public Material ConvertToUnityPBRSP(DTUMaterial dtuMaterial, string textureDir)
 		{
 
 			var metallicWeight = dtuMaterial.Get("Metallic Weight");
@@ -1481,7 +1612,7 @@ namespace Daz3D
 			var uvSet = dtuMaterial.Get("UV Set");
 
 			var shaderName = DTU_Constants.shaderNameMetal;
-			if (Daz3DDTUImporter.UseNewShaders)
+			if (Daz3DDTUImporter.UseLegacyShaders==false)
 				shaderName = DTU_Constants.newShaderNameBase + "Metallic";
 
 				var shader = Shader.Find(shaderName);
@@ -1507,17 +1638,17 @@ namespace Daz3D
 			}
 
 			mat.SetColor("_Diffuse",diffuseColor.Color);
-			mat.SetTexture("_DiffuseMap",ImportTextureFromPath(diffuseColor.Texture,materialDir,record));
+			mat.SetTexture("_DiffuseMap",ImportTextureFromPath(diffuseColor.Texture, textureDir, record));
 
-			mat.SetTexture("_NormalMap",ImportTextureFromPath(normalMap.Texture,materialDir, record, true));
+			mat.SetTexture("_NormalMap",ImportTextureFromPath(normalMap.Texture, textureDir, record, true));
 			mat.SetFloat("_NormalStrength",normalMap.Float);
 			mat.SetFloat("_Height",bumpStrength.Float);
-			mat.SetTexture("_HeightMap",ImportTextureFromPath(bumpStrength.Texture,materialDir, record, false, true));
+			mat.SetTexture("_HeightMap",ImportTextureFromPath(bumpStrength.Texture, textureDir, record, false, true));
 			mat.SetFloat("_HeightOffset",0.25f);
-			mat.SetTexture("_AlphaMap",ImportTextureFromPath(cutoutOpacity.Texture,materialDir, record, false, true));
+			mat.SetTexture("_AlphaMap",ImportTextureFromPath(cutoutOpacity.Texture, textureDir, record, false, true));
 
 			mat.SetFloat("_Roughness",glossyRoughness.Float);
-			mat.SetTexture("_RoughnessMap",ImportTextureFromPath(glossyRoughness.Texture,materialDir,record,false,true));
+			mat.SetTexture("_RoughnessMap",ImportTextureFromPath(glossyRoughness.Texture, textureDir, record,false,true));
 
 
 			if(horizontalTile.Exists && mat.HasProperty("_Tiling"))
@@ -1564,7 +1695,7 @@ namespace Daz3D
 		/// </summary>
 		/// <param name="dTUMaterial"></param>
 		/// <returns></returns>
-		public Material ConvertToUnityOmUberSurface(DTUMaterial dtuMaterial, string materialDir)
+		public Material ConvertToUnityOmUberSurface(DTUMaterial dtuMaterial, string textureDir)
 		{
 
 			var diffuseColor = dtuMaterial.Get("Diffuse Color");
@@ -1663,21 +1794,21 @@ namespace Daz3D
 
 			//this shader uses specular workflow, so we'll match with it
 			var shaderName = DTU_Constants.shaderNameSpecular;
-			if (Daz3DDTUImporter.UseNewShaders)
+			if (Daz3DDTUImporter.UseLegacyShaders==false)
 			{
 				shaderName = DTU_Constants.newShaderNameBase + "Specular";
 			}
 
 			if(isHair)
 			{
-				if (Daz3DDTUImporter.UseNewShaders)
+				if (Daz3DDTUImporter.UseLegacyShaders==false)
 					shaderName = DTU_Constants.newShaderNameBase + "Hair";
 				else
 					shaderName = DTU_Constants.shaderNameHair;
 			}
 			else if(isSkin)
 			{
-				if (Daz3DDTUImporter.UseNewShaders)
+				if (Daz3DDTUImporter.UseLegacyShaders==false)
 					shaderName = DTU_Constants.newShaderNameBase + "SSS";
 				else
 					shaderName = DTU_Constants.shaderNameIraySkin;
@@ -1687,7 +1818,11 @@ namespace Daz3D
 			}
 			else if(isWet)
 			{
+#if USING_STANDARD_SHADER
+				shaderName = DTU_Constants.shaderNameInvisible;
+#else
 				shaderName = DTU_Constants.shaderNameWet;
+#endif
 			}
 
 			var shader = Shader.Find(shaderName);
@@ -1727,25 +1862,58 @@ namespace Daz3D
 			{
 				//Hairs are pretty simple b/c we only care about a few properties, so we're forking here to deal with it
 				isDoubleSided = true;
-				isTransparent = true;
+				// 2022-Feb-04 (DB): hardcode isTransparent=false to fix transparency z-sorting problems
+				isTransparent = false;
 
+#if USING_STANDARD_SHADER
+				mat.EnableKeyword("_ALPHATEST_ON");
+				mat.SetFloat("_Mode", 1.0f); // Set Cutout rendering mode
+				mat.SetFloat("_Cutoff", 0.35f);
+				if (opacityStrength.TextureExists())
+					mat.SetTexture("_MainTex", ImportTextureFromPath(opacityStrength.Texture, textureDir, record, false, true, true));
+
+				mat.SetColor("_Color", diffuseColor.Color);
+				if (diffuseColor.TextureExists())
+					mat.SetTexture("_MainTex", ImportTextureFromPath(diffuseColor.Texture, textureDir, record));
+
+				if (normalMap.TextureExists())
+                {
+					mat.EnableKeyword("_NORMALMAP");
+					mat.SetTexture("_BumpMap", ImportTextureFromPath(normalMap.Texture, textureDir, record, true));
+					mat.SetFloat("_BumpScale", normalMap.Float);
+				}
+				else
+                {
+					mat.DisableKeyword("_NORMALMAP");
+				}
+				if (bumpStrength.TextureExists())
+                {
+					mat.EnableKeyword("_PARALLAXMAP");
+					mat.SetFloat("_Parallax", bumpStrength.Float / 400.0f);
+					mat.SetTexture("_ParallaxMap", ImportTextureFromPath(bumpStrength.Texture, textureDir, record, false, true));
+				}
+				else
+                {
+					mat.DisableKeyword("_PARALLAXMAP");
+				}
+#else
 				mat.SetColor("_Diffuse",diffuseColor.Color);
-				mat.SetTexture("_DiffuseMap",ImportTextureFromPath(diffuseColor.Texture,materialDir, record));
-				mat.SetTexture("_NormalMap",ImportTextureFromPath(normalMap.Texture,materialDir, record, true));
+				mat.SetTexture("_DiffuseMap",ImportTextureFromPath(diffuseColor.Texture, textureDir, record));
+				mat.SetTexture("_NormalMap",ImportTextureFromPath(normalMap.Texture, textureDir, record, true));
 				if (normalMap.Texture == "")
 					mat.SetFloat("_NormalStrength", 0.5f);
 				else
 					mat.SetFloat("_NormalStrength",normalMap.Float);
 				mat.SetFloat("_Height",bumpStrength.Float);
-				mat.SetTexture("_HeightMap",ImportTextureFromPath(bumpStrength.Texture,materialDir, record, false, true));
+				mat.SetTexture("_HeightMap",ImportTextureFromPath(bumpStrength.Texture, textureDir, record, false, true));
 				mat.SetFloat("_HeightOffset",0.25f);
 #if USING_HDRP || USING_URP
-				mat.SetTexture("_CutoutOpacityMap",ImportTextureFromPath(opacityStrength.Texture,materialDir, record, false, true));
+				mat.SetTexture("_CutoutOpacityMap",ImportTextureFromPath(opacityStrength.Texture, textureDir, record, false, true));
 #elif USING_BUILTIN
 				mat.SetFloat("_Alpha", opacityStrength.Float);
-				mat.SetTexture("_AlphaMap", ImportTextureFromPath(opacityStrength.Texture, materialDir, record, false, true));
+				mat.SetTexture("_AlphaMap", ImportTextureFromPath(opacityStrength.Texture, textureDir, record, false, true));
 #endif
-				mat.SetTexture("_GlossyRoughnessMap",ImportTextureFromPath(glossiness.Texture,materialDir, record, false, true));
+				mat.SetTexture("_GlossyRoughnessMap",ImportTextureFromPath(glossiness.Texture, textureDir, record, false, true));
 				if (glossiness.Float > 0.60f)
 					mat.SetFloat("_GlossyRoughness", glossiness.Float - 0.25f);
 				else
@@ -1764,6 +1932,7 @@ namespace Daz3D
 				mat.SetFloat("_AlphaClipThreshold", 0.35f);
 #endif
 				mat.SetFloat("_AlphaPower",1.0f);
+#endif // USING_STANDARD_SHADER
 			}
 			else if(isWet)
 			{
@@ -1776,54 +1945,54 @@ namespace Daz3D
 				//TODO: we can pull data from the existing object, but for now these values work well
 				mat.SetFloat("_Smoothness",0.97f);
 				mat.SetFloat("_Normal",normalMap.Float);
-				mat.SetTexture("_NormalMap",ImportTextureFromPath(normalMap.Texture,materialDir, record, true));
+				mat.SetTexture("_NormalMap",ImportTextureFromPath(normalMap.Texture, textureDir, record, true));
 				mat.SetFloat("_Height",bumpStrength.Float);
-				mat.SetTexture("_HeightMap",ImportTextureFromPath(bumpStrength.Texture,materialDir, record, false,true));
+				mat.SetTexture("_HeightMap",ImportTextureFromPath(bumpStrength.Texture, textureDir, record, false,true));
 				mat.SetFloat("_HeightOffset",0.25f);
 			}
 			else
 			{
 				mat.SetColor("_Diffuse",diffuseColor.Color);
-				mat.SetTexture("_DiffuseMap",ImportTextureFromPath(diffuseColor.Texture,materialDir, record));
+				mat.SetTexture("_DiffuseMap",ImportTextureFromPath(diffuseColor.Texture, textureDir, record));
 
 				if(opacityActive.Float > 0f)
 				{
 					mat.SetFloat("_Alpha",opacityStrength.Float);
-					mat.SetTexture("_AlphaMap",ImportTextureFromPath(opacityStrength.Texture,materialDir, record, false, true));
+					mat.SetTexture("_AlphaMap",ImportTextureFromPath(opacityStrength.Texture, textureDir, record, false, true));
 				}
-				mat.SetTexture("_GlossyRoughnessMap",ImportTextureFromPath(glossiness.Texture,materialDir, record, false, true));
+				mat.SetTexture("_GlossyRoughnessMap",ImportTextureFromPath(glossiness.Texture, textureDir, record, false, true));
 				mat.SetFloat("_GlossyRoughness",glossiness.Float);
 
 
-				mat.SetTexture("_NormalMap",ImportTextureFromPath(normalMap.Texture,materialDir, record, true));
+				mat.SetTexture("_NormalMap",ImportTextureFromPath(normalMap.Texture, textureDir, record, true));
 				mat.SetFloat("_Normal",normalMap.Float);
 
 				if(bumpActive.Float > 0f)
 				{
 					mat.SetFloat("_Height",bumpStrength.Float);
-					mat.SetTexture("_HeightMap",ImportTextureFromPath(bumpStrength.Texture,materialDir, record, false, true));
+					mat.SetTexture("_HeightMap",ImportTextureFromPath(bumpStrength.Texture, textureDir, record, false, true));
 					mat.SetFloat("_HeightOffset",0.25f);
 				}
 
 				if(specularActive.Float> 0f)
 				{
 					mat.SetColor("_SpecularColor",specularColor.Color);
-					mat.SetTexture("_SpecularColorMap",ImportTextureFromPath(specularColor.Texture,materialDir,record));
+					mat.SetTexture("_SpecularColorMap",ImportTextureFromPath(specularColor.Texture, textureDir, record));
 
 					mat.SetFloat("_SpecularStrength",specularStrength.Float);
-					mat.SetTexture("_SpecularStrengthMap",ImportTextureFromPath(specularStrength.Texture,materialDir,record,false,true));
+					mat.SetTexture("_SpecularStrengthMap",ImportTextureFromPath(specularStrength.Texture, textureDir, record,false,true));
 				}
 
 				if(amibentActive.Float > 0f)
 				{
 					mat.SetColor("_Emission",ambientColor.Color);
-					mat.SetTexture("_EmissionMap",ImportTextureFromPath(ambientColor.Texture,materialDir,record));
+					mat.SetTexture("_EmissionMap",ImportTextureFromPath(ambientColor.Texture, textureDir, record));
 					mat.SetFloat("_EmissionStrength",ambientStrength.Float);
-					mat.SetTexture("_EmissionStrengthMap",ImportTextureFromPath(ambientStrength.Texture,materialDir,record,false,true));
+					mat.SetTexture("_EmissionStrengthMap",ImportTextureFromPath(ambientStrength.Texture, textureDir, record,false,true));
 					mat.SetFloat("_EmissionExposureWeight",0.0f); //hardcoded
 				}
 
-				mat.SetTexture("_AmbientOcclusionMap",ImportTextureFromPath(occlusion.Texture,materialDir,record,false,true));
+				mat.SetTexture("_AmbientOcclusionMap",ImportTextureFromPath(occlusion.Texture, textureDir, record,false,true));
 			}
 
 
@@ -1850,7 +2019,8 @@ namespace Daz3D
 			return mat;
 
 		}
-		public Material ConvertToUnityBlendedDualLobeHair(DTUMaterial dtuMaterial, string materialDir)
+
+		public Material ConvertToUnityBlendedDualLobeHair(DTUMaterial dtuMaterial, string textureDir)
 		{
 
 			var linePreviewColor = dtuMaterial.Get("Line Preview Color");
@@ -1897,7 +2067,7 @@ namespace Daz3D
 			var valueLower = dtuMaterial.Value.ToLower();
 
 			string shaderName = DTU_Constants.shaderNameHair;
-			if (Daz3DDTUImporter.UseNewShaders)
+			if (Daz3DDTUImporter.UseLegacyShaders==false)
 				shaderName = DTU_Constants.newShaderNameBase + "Hair";
 
 				var shader = Shader.Find(shaderName);
@@ -1911,33 +2081,34 @@ namespace Daz3D
 
 
 			bool isDoubleSided = true;
-			bool isTransparent = true;
+			// 2022-Feb-13 (DB): hardcode from isTransparent=true back to isTransparent=false to fix zsorting problems with hair vs cap, etc
+			bool isTransparent = false;
 
 			mat.SetColor("_Diffuse",diffuseColor.Color);
-			mat.SetTexture("_DiffuseMap",ImportTextureFromPath(diffuseColor.Texture,materialDir, record));
+			mat.SetTexture("_DiffuseMap",ImportTextureFromPath(diffuseColor.Texture, textureDir, record));
 
 			if(Mathf.Approximately((float)bumpMode.Value.AsDouble,0))
 			{
 				//height map
 				mat.SetFloat("_Height",bumpStrength.Float);
-				mat.SetTexture("_HeightMap",ImportTextureFromPath(bumpStrength.Texture,materialDir, record, false, true));
+				mat.SetTexture("_HeightMap",ImportTextureFromPath(bumpStrength.Texture, textureDir, record, false, true));
 				mat.SetFloat("_HeightOffset",0.25f);
 			}
 			else
 			{
 				//normal map
-				mat.SetTexture("_NormalMap",ImportTextureFromPath(bumpStrength.Texture,materialDir, record, true));
+				mat.SetTexture("_NormalMap",ImportTextureFromPath(bumpStrength.Texture, textureDir, record, true));
 				mat.SetFloat("_NormalStrength",bumpStrength.Float);
 			}
 
-			mat.SetTexture("_CutoutOpacityMap",ImportTextureFromPath(cutoutOpacity.Texture,materialDir, record, false, true));
-			mat.SetTexture("_GlossyRoughnessMap",ImportTextureFromPath(baseRoughness.Texture,materialDir, record, false, true));
+			mat.SetTexture("_CutoutOpacityMap",ImportTextureFromPath(cutoutOpacity.Texture, textureDir, record, false, true));
+			mat.SetTexture("_GlossyRoughnessMap",ImportTextureFromPath(baseRoughness.Texture, textureDir, record, false, true));
 			mat.SetFloat("_GlossyRoughness",baseRoughness.Float);
 
-			mat.SetTexture("_SpecularMap",ImportTextureFromPath(hairRootColor.Texture,materialDir,record));
+			mat.SetTexture("_SpecularMap",ImportTextureFromPath(hairRootColor.Texture, textureDir, record));
 			mat.SetColor("_SpecularColor",hairRootColor.Color);
 
-			mat.SetTexture("_SpecularMapSecondary",ImportTextureFromPath(hairTipColor.Texture,materialDir,record));
+			mat.SetTexture("_SpecularMapSecondary",ImportTextureFromPath(hairTipColor.Texture, textureDir, record));
 			mat.SetColor("_SpecularColorSecondary",hairTipColor.Color);
 
 			//A few magic values that work for most hairs
@@ -1969,7 +2140,144 @@ namespace Daz3D
 			return mat;
 		}
 
-		public Material ConvertToUnityOOTHairblendingHair(DTUMaterial dtuMaterial, string materialDir)
+		// 2022-Feb-08 (DB): Based on ConvertToUnityBlendedDualLobeHair()
+		public Material ConvertToUnityLittleFoxHair(DTUMaterial dtuMaterial, string textureDir)
+		{
+			// "LLF-BaseColor"
+			// "LLF-HairUnderStrand Ombre"
+			// "LLFHairGradientIntensity"
+			// "LLFHair Strand Color"
+			// "LLFHairStrand1Intensity"
+			// "LLFHairStrandColor2"
+			// "LLFHairStrand2Intensity"
+			// "LLFHair Root Color"
+			// "LLFHairRootIntensity"
+			// "LLFHairRoot2"
+			// "LLFHairRoot2Intensity"
+			// "LLFHair Fade Color"
+			// "LLFHairFadeIntensity"
+			// "LLFHairTipsColor"
+			// "LLFHairTipIntensity"
+
+			var diffuseColor = dtuMaterial.Get("LLF-BaseColor");
+			var hairRootColor = dtuMaterial.Get("LLFHair Root Color");
+			var hairTipColor = dtuMaterial.Get("LLFHairTipsColor");
+
+			var linePreviewColor = dtuMaterial.Get("Line Preview Color");
+			var lineStartWidth = dtuMaterial.Get("Line Start Width");
+			var lineEndWidth = dtuMaterial.Get("Line End Width");
+			var lineUVWidth = dtuMaterial.Get("Line UV Width");
+
+			var rootTransmissionColor = dtuMaterial.Get("Root Transmission Color");
+			var tipTransmissionColor = dtuMaterial.Get("Tip Transmission Color");
+			var viewportColor = dtuMaterial.Get("Viewport Color");
+			var glossyLayerWeight = dtuMaterial.Get("Glossy Layer Weight");
+			var baseRoughness = dtuMaterial.Get("base_roughness"); //not a typo
+			var highlightWeight = dtuMaterial.Get("Highlight Weight");
+			var highlightRootColor = dtuMaterial.Get("Highlight Root Color");
+			var tipHighlightColor = dtuMaterial.Get("Tip Highlight Color");
+			var highlightRoughness = dtuMaterial.Get("highlight_roughness"); //not a typo
+			var separation = dtuMaterial.Get("separation"); //not a typo
+			var rootToTipBias = dtuMaterial.Get("Root To Tip Bias");
+			var rootToTipGain = dtuMaterial.Get("Root To Tip Gain");
+			var anisotropy = dtuMaterial.Get("Anisotropy");
+			var anisotropyRotations = dtuMaterial.Get("Anisotropy Rotations");
+			var bumpMode = dtuMaterial.Get("Bump Mode"); //Can either be "Height Map"=0 or "Normal Map"=1
+			var bumpStrength = dtuMaterial.Get("Bump Strength");
+			// DB (2021-05-14): added functionallity to return default value if property does not exist
+			var cutoutOpacity = dtuMaterial.Get("Cutout Opacity", new DTUValue(1.0f));
+			var strength = dtuMaterial.Get("strength"); //not a typo
+			var minimumDisplacement = dtuMaterial.Get("Minimum Displacement");
+			var maximumDisplacement = dtuMaterial.Get("Maximum Displacement");
+			var subdDisplacementLevel = dtuMaterial.Get("SubD Displacement Level");
+
+
+			var horizontalTile = dtuMaterial.Get("Horizontal Tiles");
+			var horizontalOffset = dtuMaterial.Get("Horizontal Offset");
+			var verticalTile = dtuMaterial.Get("Vertical Tiles");
+			var verticalOffset = dtuMaterial.Get("Vertical Offset");
+			var uvSet = dtuMaterial.Get("UV Set");
+
+
+			var matNameLower = dtuMaterial.MaterialName.ToLower();
+			var assetNameLower = dtuMaterial.AssetName.ToLower();
+			var valueLower = dtuMaterial.Value.ToLower();
+
+			string shaderName = DTU_Constants.shaderNameHair;
+			if (Daz3DDTUImporter.UseLegacyShaders==false)
+				shaderName = DTU_Constants.newShaderNameBase + "Hair";
+
+			var shader = Shader.Find(shaderName);
+			if (shader == null)
+			{
+				UnityEngine.Debug.LogError("Failed to locate shader: " + shaderName + " for mat: " + dtuMaterial.MaterialName);
+				return null;
+			}
+			var mat = new Material(shader);
+			var record = new Daz3DDTUImporter.ImportEventRecord();
+
+
+			bool isDoubleSided = true;
+			// 2022-Feb-13 (DB): hardcode from isTransparent=true back to isTransparent=false to fix zsorting problems with hair vs cap, etc
+			bool isTransparent = false;
+
+			mat.SetColor("_Diffuse", diffuseColor.Color);
+			mat.SetTexture("_DiffuseMap", ImportTextureFromPath(diffuseColor.Texture, textureDir, record));
+
+			if (Mathf.Approximately((float)bumpMode.Value.AsDouble, 0))
+			{
+				//height map
+				mat.SetFloat("_Height", bumpStrength.Float);
+				mat.SetTexture("_HeightMap", ImportTextureFromPath(bumpStrength.Texture, textureDir, record, false, true));
+				mat.SetFloat("_HeightOffset", 0.25f);
+			}
+			else
+			{
+				//normal map
+				mat.SetTexture("_NormalMap", ImportTextureFromPath(bumpStrength.Texture, textureDir, record, true));
+				mat.SetFloat("_NormalStrength", bumpStrength.Float);
+			}
+
+			mat.SetTexture("_CutoutOpacityMap", ImportTextureFromPath(cutoutOpacity.Texture, textureDir, record, false, true));
+			mat.SetTexture("_GlossyRoughnessMap", ImportTextureFromPath(baseRoughness.Texture, textureDir, record, false, true));
+			mat.SetFloat("_GlossyRoughness", baseRoughness.Float);
+
+			mat.SetTexture("_SpecularMap", ImportTextureFromPath(hairRootColor.Texture, textureDir, record));
+			mat.SetColor("_SpecularColor", hairRootColor.Color);
+
+			mat.SetTexture("_SpecularMapSecondary", ImportTextureFromPath(hairTipColor.Texture, textureDir, record));
+			mat.SetColor("_SpecularColorSecondary", hairTipColor.Color);
+
+			//A few magic values that work for most hairs
+			mat.SetFloat("_AlphaStrength", 1.2f);
+			mat.SetFloat("_AlphaOffset", 0.25f);
+#if USING_HDRP
+			mat.SetFloat("_AlphaClip", 0.75f);
+#elif USING_URP
+			mat.SetFloat("_AlphaClipThreshold", 0.8f);
+#elif USING_BUILTIN
+			mat.SetFloat("_AlphaClipThreshold", 0.35f);
+#endif
+			mat.SetFloat("_AlphaPower", 1.0f);
+
+
+			bool hasDualLobeSpecularWeight = false;
+			bool hasDualLobeSpecularReflectivity = false;
+			bool hasGlossyLayeredWeight = false;
+			bool hasGlossyColor = false;
+			int sortingPriority = 0;
+
+			ToggleCommonMaterialProperties(ref mat, matNameLower, isTransparent, isDoubleSided, hasDualLobeSpecularWeight, hasDualLobeSpecularReflectivity, sortingPriority, hasGlossyLayeredWeight, hasGlossyColor);
+
+			if (record.Tokens.Count > 0)
+			{
+				Daz3DDTUImporter.EventQueue.Enqueue(record);
+			}
+
+			return mat;
+		}
+
+		public Material ConvertToUnityOOTHairblendingHair(DTUMaterial dtuMaterial, string textureDir)
 		{
 			//This material type is used for hair in Daz so we can make a few assumptions
 			//there are a lot of properties in this shader but we only support a few here
@@ -2040,7 +2348,7 @@ namespace Daz3D
 			var valueLower = dtuMaterial.Value.ToLower();
 
 			string shaderName = DTU_Constants.shaderNameHair;
-			if (Daz3DDTUImporter.UseNewShaders)
+			if (Daz3DDTUImporter.UseLegacyShaders==false)
 				shaderName = DTU_Constants.newShaderNameBase + "Hair";
 
 				var shader = Shader.Find(shaderName);
@@ -2054,29 +2362,30 @@ namespace Daz3D
 
 
 			bool isDoubleSided = true;
-			bool isTransparent = true;
+			// 2022-Feb-04 (DB): hardcode isTransparent=false to fix transparency z-sort problems
+			bool isTransparent = false;
 
 
 
 
 
 			mat.SetColor("_Diffuse",diffuseColor.Color);
-			mat.SetTexture("_DiffuseMap",ImportTextureFromPath(diffuseColor.Texture,materialDir, record));
-			mat.SetTexture("_NormalMap",ImportTextureFromPath(normalMap.Texture,materialDir, record, true));
+			mat.SetTexture("_DiffuseMap",ImportTextureFromPath(diffuseColor.Texture, textureDir, record));
+			mat.SetTexture("_NormalMap",ImportTextureFromPath(normalMap.Texture, textureDir, record, true));
 			mat.SetFloat("_NormalStrength",normalMap.Float);
 			mat.SetFloat("_Height",bumpStrength.Float);
-			mat.SetTexture("_HeightMap",ImportTextureFromPath(bumpStrength.Texture,materialDir, record, false, true));
+			mat.SetTexture("_HeightMap",ImportTextureFromPath(bumpStrength.Texture, textureDir, record, false, true));
 			mat.SetFloat("_HeightOffset",0.25f);
 #if USING_HDRP || USING_URP
-			mat.SetTexture("_CutoutOpacityMap",ImportTextureFromPath(cutoutOpacity.Texture,materialDir, record, false, true));
+			mat.SetTexture("_CutoutOpacityMap",ImportTextureFromPath(cutoutOpacity.Texture, textureDir, record, false, true));
 #elif USING_BUILTIN
 			mat.SetFloat("_Alpha", cutoutOpacity.Float);
-			mat.SetTexture("_AlphaMap", ImportTextureFromPath(cutoutOpacity.Texture, materialDir, record, false, true));
+			mat.SetTexture("_AlphaMap", ImportTextureFromPath(cutoutOpacity.Texture, textureDir, record, false, true));
 #endif
-			mat.SetTexture("_GlossyRoughnessMap",ImportTextureFromPath(glossyRoughness.Texture,materialDir, record, false, true));
+			mat.SetTexture("_GlossyRoughnessMap",ImportTextureFromPath(glossyRoughness.Texture, textureDir, record, false, true));
 			mat.SetFloat("_GlossyRoughness",glossyRoughness.Float);
 
-			mat.SetTexture("_SpecularMap",ImportTextureFromPath(glossyColor.Texture,materialDir,record));
+			mat.SetTexture("_SpecularMap",ImportTextureFromPath(glossyColor.Texture, textureDir, record));
 			mat.SetColor("_SpecularColor",glossyColor.Color);
 
 			//A few magic values that work for most hairs
@@ -2118,12 +2427,31 @@ namespace Daz3D
 		public Material ConvertToUnity(DTUMaterial dtuMaterial)
 		{
 			var materialDir = GetMaterialDir(dtuMaterial);
+			if (UseSharedMaterialDir)
+			{
+				materialDir = DTUDir + "/Materials";
+			}
+
+			var textureDir = materialDir;
+			if (UseSharedTextureDir)
+            {
+				textureDir = DTUDir + "/Textures";
+            }
+
 			if(!System.IO.Directory.Exists(materialDir))
 			{
 				System.IO.Directory.CreateDirectory(materialDir);
 			}
-			var materialPath = materialDir + "/" + Utilities.ScrubKey(dtuMaterial.MaterialName) + ".mat";
+			if (!System.IO.Directory.Exists(textureDir))
+			{
+				System.IO.Directory.CreateDirectory(textureDir);
+			}
 
+			var materialPath = materialDir + "/" + Utilities.ScrubKey(dtuMaterial.MaterialName) + ".mat";
+			if (UseSharedMaterialDir)
+            {
+				materialPath = materialDir + "/" + Utilities.ScrubKey(dtuMaterial.ProductComponentName) + "_" + Utilities.ScrubKey(dtuMaterial.MaterialName) + ".mat";
+			}
 
 
 			DTUMaterialType materialType = DTUMaterialType.Unknown;
@@ -2172,6 +2500,10 @@ namespace Daz3D
 			{
 				materialType = DTUMaterialType.BlendedDualLobeHair;
 			}
+			else if (dtuMaterial.MaterialType == "Littlefox Hair Shader")
+			{
+				materialType = DTUMaterialType.LittleFoxHair;
+			}
 			else
 			{
 				//If we don't know what it is, we'll just try, but it's quite possible it won't work
@@ -2186,7 +2518,7 @@ namespace Daz3D
 			if(materialType == DTUMaterialType.IrayUber)
 			{
 				//If we are using the Iray Uber shader, we have a different function to handle this
-				var uberMat = ConvertToUnityIrayUber(dtuMaterial, materialDir);
+				var uberMat = ConvertToUnityIrayUber(dtuMaterial, textureDir);
 				if(uberMat != null)
 				{
 					SaveMaterialAsAsset(uberMat,materialPath);
@@ -2194,7 +2526,7 @@ namespace Daz3D
 				}
 			} else if(materialType == DTUMaterialType.DazStudioDefault)
 			{
-				var defaultMat = ConvertToUnityDazStudioDefault(dtuMaterial, materialDir);
+				var defaultMat = ConvertToUnityDazStudioDefault(dtuMaterial, textureDir);
 				if(defaultMat != null)
 				{
 					SaveMaterialAsAsset(defaultMat,materialPath);
@@ -2202,7 +2534,7 @@ namespace Daz3D
 				}
 			} else if(materialType == DTUMaterialType.PBRSP)
 			{
-				var pbrspMat = ConvertToUnityPBRSP(dtuMaterial,materialDir);
+				var pbrspMat = ConvertToUnityPBRSP(dtuMaterial, textureDir);
 				if(pbrspMat != null)
 				{
 					SaveMaterialAsAsset(pbrspMat,materialPath);
@@ -2210,7 +2542,7 @@ namespace Daz3D
 				}
 			} else if(materialType == DTUMaterialType.OmUberSurface)
 			{
-				var localMat = ConvertToUnityOmUberSurface(dtuMaterial,materialDir);
+				var localMat = ConvertToUnityOmUberSurface(dtuMaterial, textureDir);
 				if(localMat != null)
 				{
 					SaveMaterialAsAsset(localMat,materialPath);
@@ -2218,7 +2550,7 @@ namespace Daz3D
 				}
 			} else if(materialType == DTUMaterialType.OOTHairblendingHair)
 			{
-				var localMat = ConvertToUnityOOTHairblendingHair(dtuMaterial,materialDir);
+				var localMat = ConvertToUnityOOTHairblendingHair(dtuMaterial, textureDir);
 				if(localMat != null)
 				{
 					SaveMaterialAsAsset(localMat,materialPath);
@@ -2226,15 +2558,24 @@ namespace Daz3D
 				}
 			} else if(materialType == DTUMaterialType.BlendedDualLobeHair)
 			{
-				var localMat = ConvertToUnityBlendedDualLobeHair(dtuMaterial,materialDir);
+				var localMat = ConvertToUnityBlendedDualLobeHair(dtuMaterial, textureDir);
 				if(localMat != null)
 				{
 					SaveMaterialAsAsset(localMat,materialPath);
 					return localMat;
 				}
 			}
+			else if (materialType == DTUMaterialType.LittleFoxHair)
+			{
+				var localMat = ConvertToUnityLittleFoxHair(dtuMaterial, textureDir);
+				if (localMat != null)
+				{
+					SaveMaterialAsAsset(localMat, materialPath);
+					return localMat;
+				}
+			}
 
-			UnityEngine.Debug.LogError("Unsupported materialType: " + materialType + " raw shade ris: " + dtuMaterial.MaterialType);
+			UnityEngine.Debug.LogError("Unsupported materialType: " + materialType + " raw shader is: " + dtuMaterial.MaterialType);
 			return null;
 		}
 
@@ -2275,7 +2616,7 @@ namespace Daz3D
 		/// <param name="path"></param>
 		/// <returns></returns>
 		public Texture2D ImportTextureFromPath(string path, string localAssetDir, Daz3DDTUImporter.ImportEventRecord record,
-			bool isNormal = false, bool isLinear = false )
+			bool isNormal = false, bool isLinear = false, bool isOpacityMap = false )
 		{
 			if(string.IsNullOrEmpty(path))
 			{
@@ -2353,6 +2694,10 @@ namespace Daz3D
 					dirty = true;
 				}
 
+				if (isOpacityMap)
+                {
+					ti.alphaSource = TextureImporterAlphaSource.FromGrayScale;
+                }
 
 				if(dirty)
 				{
@@ -2375,6 +2720,8 @@ namespace Daz3D
 	public struct DTUMaterial
 	{
 		public float Version;
+		public string ProductName;
+		public string ProductComponentName;
 		public string AssetName;
 		public string MaterialName;
 		public string MaterialType;
@@ -2400,6 +2747,11 @@ namespace Daz3D
 				return _map;
 			}
 		}
+
+		public bool HasProperty(string key)
+        {
+			return Map.ContainsKey(key);
+        }
 
 		public DTUMaterialProperty Get(string key)
 		{
@@ -2525,8 +2877,10 @@ namespace Daz3D
 
 			var dtu = new DTU();
 			dtu.DTUPath = path;
+			dtu.UseSharedMaterialDir = false;
+			dtu.UseSharedTextureDir = false;
 
-			if(!System.IO.File.Exists(path))
+			if (!System.IO.File.Exists(path))
 			{
 				UnityEngine.Debug.LogError("DTU File: " + path + " does not exist");
 				return dtu;
@@ -2548,6 +2902,8 @@ namespace Daz3D
 			dtu.AssetID = root["Asset Id"].Value;
 			dtu.AssetName = root["Asset Name"].Value;
 			dtu.AssetType = root["Asset Type"].Value;
+			dtu.ProductName = root["Product Name"].Value;
+			dtu.ProductComponentName = root["Product Component Name"].Value;
 			dtu.FBXFile = root["FBX File"].Value;
 			dtu.ImportFolder = root["Import Folder"].Value;
 			dtu.Materials = new List<DTUMaterial>();
@@ -2560,6 +2916,8 @@ namespace Daz3D
 				var dtuMat = new DTUMaterial();
 
 				dtuMat.Version = mat["Version"].AsFloat;
+				dtuMat.ProductName = dtu.ProductName;
+				dtuMat.ProductComponentName = dtu.ProductComponentName;
 				dtuMat.AssetName = mat["Asset Name"].Value;
 				dtuMat.MaterialName = mat["Material Name"].Value;
 				dtuMat.MaterialType = mat["Material Type"].Value;
